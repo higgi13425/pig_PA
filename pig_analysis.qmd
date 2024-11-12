@@ -1,0 +1,204 @@
+---
+title: "Pig PA ultrasound data"
+format: html
+editor: visual
+---
+## setup
+
+```{r}
+#| include: false
+library(tidyverse)
+library(janitor)
+library(readxl)
+library(here)
+library(gt)
+library(rstatix)
+```
+
+## Read in Data
+
+```{r}
+readxl::read_excel(here("PIG PAUS data_yc.xlsx")) %>%
+  janitor::clean_names() |> 
+  janitor::remove_empty() |> 
+  mutate(measurement_value = as.numeric(measurement_value)) ->
+df
+```
+
+
+## Analysis
+
+```{r}
+df |> 
+  group_by(pig, treated, wavelength) |>
+  summarise(mean = mean(measurement_value, na.rm=TRUE), 
+            sd = sd(measurement_value, na.rm=TRUE)) |> 
+  gt() |> 
+  tab_header(
+    title = md("Data Grouped by Pig, Treatment, and Wavelength")
+  )
+
+df |> 
+  group_by(treated, wavelength) |>
+  summarise(mean = mean(measurement_value, na.rm=TRUE), 
+            sd = sd(measurement_value, na.rm=TRUE)) |> 
+  gt() |> 
+  tab_header(
+    title = md("Data Grouped by Treatment (0/1) and Wavelength")
+  )
+```
+
+We can perform unpaired t tests without regard to pig or esophageal location
+
+```{r}
+df |> 
+  filter(wavelength == 800) |> 
+  rstatix::t_test(measurement_value ~ treated, var.equal = TRUE) 
+```
+
+```{r}
+df |> 
+  filter(wavelength == 1200) |> 
+  rstatix::t_test(measurement_value ~ treated, var.equal = TRUE) 
+```
+
+```{r}
+df |> 
+  filter(wavelength ==1310) |> 
+  rstatix::t_test(measurement_value ~ treated, var.equal = TRUE) 
+```
+
+There appear to be significant differences between treated and untreated pigs at all wavelengths.  The differences are most pronounced at 800 nm.
+
+
+# Modeling measurement values
+```{r}
+model <- lm(measurement_value ~ pig + treated + site_cm, data = df |> filter(wavelength == 800))
+
+model |> 
+  broom::tidy() 
+```
+Even with this small N, there is some variance from pig to pig at 800 nm. There is a trend toward higher values for Pig 3. There is a significant difference between treated and untreated pigs. Treatment increases signal at 800 nm by ~ 2020 AU. There is minimal difference between the different esophageal sites (with this small N). We are not controlling for pig age, which might correlate with higher signals.
+
+```{r}
+model <- lm(measurement_value ~ pig + treated + site_cm, data = df |> filter(wavelength == 1200))
+
+model |> 
+  broom::tidy() 
+```
+Even with this small N, there is some variance from pig to pig at 1200 nm. There is a trend toward higher values for Pig 3. There is a significant difference between treated and untreated pigs. Treatment increases signal at 1200 nm by ~ 2078 AU.  There is minimal difference between the different esophageal sites (with this small N). We are not controlling for pig age, which might correlate with higher signals.
+
+
+```{r}
+model <- lm(measurement_value ~ treated + site_cm, 
+            data = df |> filter(wavelength == 1310))
+
+model |> 
+  broom::tidy() 
+```
+Only one pig was evaluated at 1310 nm. There is a significant difference between treated and untreated pigs.Treatment increases signal at 1310 nm by ~ 1857 AU.   There is minimal difference between the different esophageal sites (with this small N). We are not controlling for pig age, which might correlate with higher signals.
+
+## Let's look at paired t-tests - in the same pig at the same site.
+First, let's look at the differencs at 800 nm
+
+```{r}
+df |> 
+  filter(wavelength == 800) |>
+             arrange(pig, site_cm, treated) |> 
+  filter(lag(site_cm) == site_cm | lead(site_cm) == site_cm) |> 
+  mutate(diff = measurement_value - lag(measurement_value)) |>
+  filter(treated ==1) |> 
+  gt()
+  
+```
+
+Now let's perform the paired t-test at 800 nm - in two ways, first by looking at the differences in the same pig at the same site, then by using the official paired t test.
+
+```{r}
+df |> 
+  filter(wavelength == 800) |>
+             arrange(pig, site_cm, treated) |> 
+  filter(lag(site_cm) == site_cm | lead(site_cm) == site_cm) |> 
+  mutate(diff = measurement_value - lag(measurement_value)) |>
+  filter(treated ==1) |> 
+  rstatix::t_test(diff ~ 1, mu = 0) 
+
+df |> 
+  filter(wavelength == 800) |>
+             arrange(pig, site_cm, treated) |> 
+  filter(site_cm %in% c(30,40,50)) |>
+  filter(pig == 'PAPC-1') |>
+  rstatix::t_test(measurement_value ~ treated, paired = TRUE)
+```
+
+Again, the differences with treatment are significant.
+
+
+First, let's look at the differencs at 800 nm
+
+```{r}
+df |> 
+  filter(wavelength == 800) |>
+             arrange(pig, site_cm, treated) |> 
+  filter(lag(site_cm) == site_cm | lead(site_cm) == site_cm) |> 
+  mutate(diff = measurement_value - lag(measurement_value)) |>
+  filter(treated ==1) |> 
+  gt()
+  
+```
+
+Now let's perform the paired t-test at 1200 nm - in two ways, first by looking at the differences in the same pig at the same site, then by using the official paired t test.
+
+```{r}
+df |> 
+  filter(wavelength == 1200) |>
+             arrange(pig, site_cm, treated) |> 
+  filter(lag(site_cm) == site_cm | lead(site_cm) == site_cm) |> 
+  mutate(diff = measurement_value - lag(measurement_value)) |>
+  filter(treated ==1) |> 
+  rstatix::t_test(diff ~ 1, mu = 0) 
+
+df |> 
+  filter(wavelength == 1200) |>
+             arrange(pig, site_cm, treated) |> 
+  filter(site_cm %in% c(30,40,50)) |>
+  filter(pig == 'PAPC-1') |>
+  rstatix::t_test(measurement_value ~ treated, paired = TRUE) 
+```
+
+Again, the differences with treatment are significant.
+
+
+Now let's perform the paired t-test at 1310 nm.
+
+```{r}
+df |> 
+  filter(wavelength == 1310) |>
+             arrange(pig, site_cm, treated) |> 
+  filter(lag(site_cm) == site_cm | lead(site_cm) == site_cm) |> 
+  mutate(diff = measurement_value - lag(measurement_value)) |>
+  filter(treated ==1) |> 
+  rstatix::t_test(diff ~ 1, mu = 0) 
+
+```
+
+Again, the differences with treatment are significant.
+
+## Plotting the data
+
+```{r}
+#| fig.width=12
+df |> 
+  ggplot(aes(x = site_cm, y = measurement_value, color = factor(treated))) +
+  geom_point() +
+  facet_grid(pig ~ wavelength) +
+  labs(title = "Measurement values by Wavelength, Pig, and APC treatment",
+       x = "Site (cm)",
+       y = "Measurement value (AU)",
+       color = "Treated") +
+  scale_color_manual(values = c("black", "red"),
+                     labels = c("No Rx", "APC"),
+                     guide = guide_legend(reverse = TRUE)) +
+  theme_minimal(base_size = 16)
+```
+
